@@ -148,17 +148,23 @@ print to minibuffer and copy to kill-ring. Otherwise, returns the link as a stri
 	  (print-or-return res)))))
 
 (defun github-permalink-at-point ()
-  "Returns a permalink to the HEAD of the current file at the line under point. If
-called interactively, will print to minibuffer and copy to kill-ring. Otherwise,
-returns the link as a string."
+  "Returns a permalink to the HEAD of the current file at the line under point, or
+the active region as a range. If called interactively, will print to minibuffer and
+copy to kill-ring. Otherwise, returns the link as a string."
   (interactive)
   (with-current-buffer (current-buffer)
-    (cl-flet ((build-permalink (lineno) (concat (github-file-permalink) "#L" lineno)))
-      (let ((res (-> (line-number-at-pos)
-		     number-to-string
-		     build-permalink)))
+    (cl-flet ((get-line-numbers () (if (use-region-p)
+				       (mapcar 'line-number-at-pos (list (region-beginning) (region-end)))
+				     (list (line-number-at-pos))))
+	      (build-permalink (linenos)
+			       (let ((begin (car linenos))
+				     (end (cadr linenos)))
+				 (concat (github-file-permalink) "#L" begin (if end (concat "-L" end))))))
+      (let ((permalink (->> (get-line-numbers)
+			    (mapcar 'number-to-string)
+			    build-permalink)))
 	(-> (called-interactively-p 'any)
-	    (print-or-return res))))))
+	    (print-or-return permalink))))))
 
 ;;
 ;; Tests
