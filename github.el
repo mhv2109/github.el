@@ -81,11 +81,16 @@ or simply return VAL otherwise."
 
 (defun github-remote (&optional handle)
   "Get one GitHub (fetch) remote repository for the current file. Currently only works with https URLs. HANDLE defaults to origin."
-  (interactive (list (read-string "Handle: " "origin")))
-  (let* ((handle (if handle handle "origin"))
-	 (res (cdr (assoc handle (github-remotes))))
-	 (called-interactively (called-interactively-p 'any)))
-    (print-or-return called-interactively res)))
+  (-> (read-string "Handle: " "origin")
+      list
+      interactive)
+  (cl-flet ((lookup-handle (handle) (assoc handle (github-remotes))))
+    (let ((res (-> handle
+		   (if handle "origin")
+		   lookup-handle
+		   cdr)))
+      (-> (called-interactively-p 'any)
+	  (print-or-return res)))))
 
 (defun github-user-org (url)
   "Extracts GitHub User/Org from URL. Currently only works with https URLs."
@@ -112,17 +117,21 @@ or simply return VAL otherwise."
   (let* ((remote (github-remote))
 	 (user-org (github-user-org remote))
          (project-name (github-project-name remote))
-	 (trailing-slash (if (string= (substring github-base-url -1) "/") "" "/")))
+	 (trailing-slash (-> github-base-url
+			     (substring -1)
+			     (string= "/")
+			     (if "" "/"))))
     (concat github-base-url trailing-slash user-org "/" project-name "/%s/" commit)))
 
 (defun github-project-permalink ()
   "Returns a permalink to the HEAD of the current file's project's ref. If called interactively,
  will print to minibuffer and copy to kill-ring. Otherwise, returns the link as a string."
   (interactive "p")
-  (let* ((current-commit (git-commit))
-	 (res (format (github-commit-url-format-string current-commit) "tree"))
-	 (called-interactively (called-interactively-p 'any)))
-    (print-or-return called-interactively res)))
+  (let* ((res (-> (git-commit)
+		  github-commit-url-format-string
+		  (format "tree"))))
+    (-> (called-interactively-p 'any)
+	(print-or-return res))))
 
 (defun github-file-permalink ()
   "Returns a permalink to the HEAD of the current file. If called interactively, will
@@ -130,23 +139,26 @@ print to minibuffer and copy to kill-ring. Otherwise, returns the link as a stri
   (interactive)
   (with-current-buffer (current-buffer)
     (let* ((current-commit (git-commit))
-	   (current-file buffer-file-name)
-	   (trimmed (string-trim-left current-file (git-root)))
-	   (format-string (github-commit-url-format-string current-commit))
-	   (formatted (format format-string "blob"))
-	   (res (concat formatted trimmed))
-	   (called-interactively (called-interactively-p 'any)))
-      (print-or-return called-interactively res))))
+	   (trimmed (-> buffer-file-name
+			(string-trim-left (git-root))))
+	   (res (-> (github-commit-url-format-string current-commit)
+		    (format "blob")
+		    (concat trimmed))))
+      (-> (called-interactively-p 'any)
+	  (print-or-return res)))))
 
 (defun github-permalink-at-point ()
-  ;; TODO: use github-file-permalink + elisp functions to build a permalink to a specific line in a file
+  "Returns a permalink to the HEAD of the current file at the line under point. If
+called interactively, will print to minibuffer and copy to kill-ring. Otherwise,
+returns the link as a string."
   (interactive)
   (with-current-buffer (current-buffer)
-    (let* ((file-permalink (github-file-permalink))
-	   (line-number (line-number-at-pos))
-	   (res (concat file-permalink "#L" (number-to-string line-number)))
-	   (called-interactively (called-interactively-p 'any)))
-      (print-or-return called-interactively res))))
+    (cl-flet ((build-permalink (lineno) (concat (github-file-permalink) "#L" lineno)))
+      (let ((res (-> (line-number-at-pos)
+		     number-to-string
+		     build-permalink)))
+	(-> (called-interactively-p 'any)
+	    (print-or-return res))))))
 
 ;;
 ;; Tests
