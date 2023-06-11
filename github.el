@@ -64,23 +64,29 @@ or simply return VAL otherwise."
     val))
 
 (defun github-remotes ()
-  "Get the GitHub (fetch) remote repositories for the current file as (name . url) pairs. Currently only works with https URLs."
+  "Get the GitHub (fetch) remote repositories for the current file as (NAME . URL) pairs. Works with https and ssh URLs."
   (with-current-buffer (current-buffer)
-    (let ((remotes (split-string (shell-command-to-string "git remote -v") "\n"))
-	  (extract (lambda (remote)
-		     (cond
-		      ;; HTTP GH remotes
-		      ((string-match "^\\(.*\\)[[:space:]]+\\(https://github\.com.*\\)[[:space:]]+(fetch)$" remote) (let ((handle (match-string 1 remote))
-															  (url (match-string 2 remote)))
-														      (cons handle url)))
-		      ;; TODO: SSH remotes
-		      ;; ()
-		      ;; default -- no remote
-		      (t nil)))))
-      (remove-if (lambda (elem) (if elem nil t)) (mapcar extract remotes)))))
+    (cl-flet* ((pluck-match (remote)
+			    (let ((handle (match-string 1 remote))
+				  (url (match-string 2 remote)))
+			      (cons handle url)))
+	       (extract (remote)
+			(cond
+			 ;; HTTP GH remotes
+			 ((string-match "^\\(.*\\)[[:space:]]+\\(https://github\.com.*\\)[[:space:]]+(fetch)$" remote) (pluck-match remote))
+			 ;; SSH GH remotes
+			 ((string-match "^\\(.*\\)[[:space:]]+\\([ssh://]?git@github\.com:.*\.git\\)[[:space:]]+(fetch)$" remote) (pluck-match remote))
+			 ;; default -- no remote
+			 (t nil)))
+	       (is-nil (item) (if item nil t)))
+      (let ((remotes (-> "git remote -v"
+			 shell-command-to-string
+			 (split-string "\n"))))
+	(->> (mapcar (lambda (remote) (extract remote)) remotes)
+	     (remove-if (lambda (item) (is-nil item))))))))
 
 (defun github-remote (&optional handle)
-  "Get one GitHub (fetch) remote repository for the current file. Currently only works with https URLs. HANDLE defaults to origin."
+  "Get one GitHub (fetch) remote repository for the current file. Works with https and ssh URLs. HANDLE defaults to origin."
   (-> (read-string "Handle: " "origin")
       list
       interactive)
@@ -93,24 +99,32 @@ or simply return VAL otherwise."
 	  (print-or-return res)))))
 
 (defun github-user-org (url)
-  "Extracts GitHub User/Org from URL. Currently only works with https URLs."
-  (cond
-   ;; HTTP
-   ((string-match "^https://github\.com/\\(.*\\)/.*$" url) (match-string 1 url))
-   ;; TODO: SSH
-   ;; ()
-   ;; default -- no match
-   (t nil)))
+  "Extracts GitHub User/Org from URL. Works with https and ssh URLs."
+  (cl-flet* ((pluck-match (remote)
+			  (match-string 1 remote))
+	     (extract-from (remote)
+			   (cond
+			    ;; HTTP
+			    ((string-match "^https://github\.com/\\(.*\\)/.*$" remote) (pluck-match remote))
+			    ;; SSH
+			    ((string-match "^[ssh://]?git@github\.com:\\(.*\\)/.*\.git$" remote) (pluck-match remote))
+			    ;; default -- no match
+			    (t nil))))
+    (extract-from url)))
 
 (defun github-project-name (url)
-  "Extracts the GitHub Project name from URL. Currently only works with https URLs."
-  (cond
-   ;; HTTP
-   ((string-match "^https://github\.com/.*/\\(.*\\)$" url) (match-string 1 url))
-   ;; TODO: SSH
-   ;; ()
-   ;; default -- no match
-   (t nil)))
+  "Extracts the GitHub Project name from URL. Works with https and ssh URLs."
+  (cl-flet* ((pluck-match (remote)
+			  (match-string 1 remote))
+	     (extract-from (remote)
+			   (cond
+			    ;; HTTP
+			    ((string-match "^https://github\.com/.*/\\(.*\\)$" remote) (pluck-match remote))
+			    ;; SSH
+			    ((string-match "^[ssh://]?git@github\.com:.*/\\(.*\\)\.git$" remote) (pluck-match remote))
+			    ;; default -- no match
+			    (t nil))))
+    (extract-from url)))
 
 (defun github-commit-url-format-string (commit)
   "Builds a format string for COMMIT, in long SHA form."
