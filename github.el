@@ -17,27 +17,91 @@ See: https://docs.github.com/en/authentication/keeping-your-account-and-data-sec
 ;; Client
 ;;
 
-(defun github-req (method path)
-  "Make a request to GitHub's API. METHOD is the HTTP method and PATH is the HTTP request path."
-  (let (
-	(url-request-method method)
+(defclass github-pageable ()
+  ((page
+    :initarg :page
+    :accessor page)
+   (next-link
+    :initarg :next-link
+    :accessor next-link)
+   (prev-link
+    :initarg :prev-link 
+    :accessor prev-link))
+  (:documentation "https://docs.github.com/en/rest/guides/using-pagination-in-the-rest-api?apiVersion=2022-11-28#using-link-headers"))
+
+(defun make-github-pageable (&rest args)
+  "Parses HTTP response per GitHub's docs to build a GITHUB-PAGEABLE.
+
+See: https://docs.github.com/en/rest/guides/using-pagination-in-the-rest-api?apiVersion=2022-11-28#using-link-headers"
+  (let* ((body (plist-get args :body))
+	 (headers (plist-get args :headers))
+	 (regex-format-string-template "[,]?[[:space:]]+<\\([^<>]*\\)>;[[:space:]]+rel=\"%s\""))
+    (cl-flet* ((regex-format-string (rel)
+				    (format regex-format-string-template rel))
+	       (extract-link (rel)
+			     (if (-> rel
+				     regex-format-string
+				     (string-match headers))
+				 (match-string 1 headers))))
+      (make-instance github-pageable
+		     :page (json-parse-string body)
+		     :next-link (extract-link "next")
+		     :prev-link (extract-link "prev")))))
+
+(cl-defgeneric pageable-next-page (pageable)
+  (:documentation "Returns the next PAGEABLE using PAGEABLE's next-link"))
+
+(cl-defgeneric pageable-prev-page (pageable)
+  (:documentation "Returns the next PAGEABLE using PAGEABLE's prev-link"))
+
+(cl-defmethod pageable-next-page ((pageable github-pageable))
+  (-> pageable
+      next-link
+      (github-req "GET")
+      make-github-pageable))
+
+(cl-defmethod pageable-prev-page ((pageable github-pageable))
+  (-> pageable
+      prev-link
+      (github-req "GET")
+      make-github-pageable))
+
+(defun github-req (method url)
+  "Make a request with http method METHOD to URL that set's the required headers for the GitHub API. Returns HEADERS and BODY as a plist with symbol keys."
+  (message (format "Making GitHub Request: %s\t%s" method url))
+  (let ((url-request-method method)
 
 	;; request headers
 	(url-request-extra-headers (list
 				     ;; auth token (PAT)
-				     (cons "Authorization" (concat "Bearer: " github-access-token))
+				     (cons "Authorization" (concat "Bearer " github-access-token))
 
 				     ;; gh's content-type
-				     (cons "Accept" "application/vnd.github+json")))
-	;; full request URL
-	(url (concat github-api-base-url "/" path)))
-    (with-current-buffer (url-retrieve-synchronously url)
-      (goto-char url-http-end-of-headers)
-      (json-parse-buffer :object-type 'alist :array-type 'list))))
+				     (cons "Accept" "application/vnd.github+json")
 
-(defun github-get (path)
+				     ;; gh API version
+				     (cons "X-GitHub-Api-Version" "2022-11-28"))))
+    (with-current-buffer (url-retrieve-synchronously url)
+      (let ((headers (buffer-substring (point-min) url-http-end-of-headers))
+	    (body (buffer-substring url-http-end-of-headers (point-max))))
+	(list :headers headers :body body)))))
+
+(defun github-req-path (method path)
+  "Make a request to GitHub's API. METHOD is the HTTP method and PATH is the HTTP request path. Uses GITHUB-API-BASE-URL."
+  (->> path
+       (concat github-api-base-url "/")
+       (github-req method)))
+
+(defun github-get-path (path)
   "Make a GET request to GitHub's API."
-  (github-req "GET" path))
+  (github-req-path "GET" path))
+
+(defun github-get-issues (remote)
+  (->> '(github-user-org github-project-name)
+       (mapcar (lambda (f) (funcall f remote)))
+       (apply 'format "repos/%s/%s/issues")
+       github-get-path
+       (apply 'make-github-pageable)))
 
 ;;
 ;; Lib
@@ -137,6 +201,10 @@ or simply return VAL otherwise."
 			     (if "" "/"))))
     (concat github-base-url trailing-slash user-org "/" project-name "/%s/" commit)))
 
+;;
+;; Permalinks
+;;
+
 (defun github-project-permalink ()
   "Returns a permalink to the HEAD of the current file's project's ref. If called interactively,
  will print to minibuffer and copy to kill-ring. Otherwise, returns the link as a string."
@@ -179,5 +247,55 @@ copy to kill-ring. Otherwise, returns the link as a string."
 			    build-permalink)))
 	(-> (called-interactively-p 'any)
 	    (print-or-return permalink))))))
+
+;;
+;; Issues
+;;
+
+(defun github-project-issues (&optional handle &rest args)
+  "List all open issues in buffer named *GitHub Issues*."
+  (-> (read-string "Handle: " "origin")
+      list
+      interactive)
+  (let ((called-interactively (called-interactively-p 'any)))
+    (cl-flet* ((to-string (val) (if (numberp val) (number-to-string val) val))
+
+	       ;; extract the relevant fields from each issue, join with a comma (,) and split with a newline (\n)
+	       (build-row (issue)
+			  ;; TODO: add keymap to visit issue in browser on <Enter>
+			  (let ((params '("number" "created_at" "title")))
+			    (string-join (mapcar (lambda (param) (-> param
+								     (gethash issue)
+								     to-string))
+						 params)
+					 "\t")))
+	       ;; build number, age, title header
+	       (build-header ()
+			     (-> "number\tcreated_at\ttitle\n"
+				 (propertize 'read-only t)
+				 insert))
+	       ;; init buffer, add the header, and each row
+	       (build-table (pageable)
+			    (let ((issues (page pageable)))
+			      (when called-interactively
+				(let ((buffer (-> args
+						  (plist-get :buffer)
+						  (or (get-buffer-create "*GitHub Issues*")))))
+				  (with-current-buffer buffer
+				    (read-only-mode)
+				    (let ((inhibit-read-only t))
+				      (erase-buffer)
+				      (build-header)
+				      (mapc (lambda (issue) (-> issue
+								build-row
+								(insert "\n")))
+					    issues)
+				      (goto-char (point-min))
+				      (display-buffer buffer)))))
+			      issues)))
+      (-> handle
+	  github-remote
+	  github-get-issues
+	  build-table))))
 
 (provide 'github)
