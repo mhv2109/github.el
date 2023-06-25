@@ -201,6 +201,75 @@ or simply return VAL otherwise."
 			     (if "" "/"))))
     (concat github-base-url trailing-slash user-org "/" project-name "/%s/" commit)))
 
+;; Links for resources on tabulated-list-mode
+;;
+;; https://www.gnu.org/software/emacs/manual/html_node/elisp/Tabulated-List-Mode.html
+;; http://rgrinberg.com/posts/emacs-table-display/
+;; https://stackoverflow.com/questions/11272632/how-to-create-a-column-view-in-emacs-lisp
+
+(defun make-tabulated-headers (rows columns-to-keep)
+  "Given a list of hashtables (ROWS) calculate the max width of each column (keys of each hashtable).
+COLUMNS-TO-KEEP is a list of keys (strings) of properties that will be calculated."
+  (let ((max-column-widths (make-hash-table :test 'equal)))
+    (cl-flet* ((keep-column (column)
+			    (member column columns-to-keep))
+	       (process-row (row)
+			    (maphash (lambda (key value)
+				       (if (keep-column key)
+					   (let* ((column-name-width (length key))
+						  (this-value (length (-> value
+									  stringp
+									  (if value (number-to-string value)))))
+						  (current-value (gethash key max-column-widths column-name-width))
+						  (max-value (max this-value current-value)))
+					     (puthash key max-value max-column-widths))))
+				     row)))
+      (mapc (lambda (row)
+	      (process-row row))
+	    rows)
+      max-column-widths)))
+
+(defun display-table-in-buffer (buffer rows columns-to-keep)
+  "Given a sequence of hashtables ROWS, display COLUMNS-TO-KEEP in BUFFER."
+  ;; TODO: pass in params for keybindings:
+  ;;   1. <Enter> to visit URL in browser
+  ;;   2. <p> for previous page (if available)
+  ;;   3. <n> for next page (if available)
+  ;;   4. <f> for first page (if not already on first page)
+  ;;   5. <l> for last page (if not already on last page)
+  (with-current-buffer buffer
+    (read-only-mode)
+    (let ((inhibit-read-only t))
+      (let* ((column-header-names-width (make-tabulated-headers rows columns-to-keep))
+	     (column-header-names columns-to-keep)
+	     (this-tabulated-list-format (vconcat (mapcar (lambda (name)
+							    (list name
+								  (gethash name column-header-names-width)
+								  t))
+							  column-header-names)))
+	     (this-tabulated-list-entries (let ((rownum 0))
+					    (mapcar (lambda (row)
+						      (progn
+							(setq rownum (+ 1 rownum))
+							(list
+							 (number-to-string rownum)
+							 (vconcat (mapcar (lambda (key)
+									    (let ((value (gethash key row)))
+									      (if (numberp value)
+										  (number-to-string value)
+										value)))
+									  column-header-names)))))
+						    rows))))
+	(erase-buffer)
+	(tabulated-list-mode)
+	(setq tabulated-list-format this-tabulated-list-format)
+	(setq tabulated-list-padding 2)
+	(tabulated-list-init-header)
+	(setq tabulated-list-entries this-tabulated-list-entries)
+	(tabulated-list-print t)
+	(goto-char (point-min))
+	(display-buffer buffer)))))
+
 ;;
 ;; Permalinks
 ;;
@@ -259,21 +328,6 @@ copy to kill-ring. Otherwise, returns the link as a string."
       interactive)
   (let ((called-interactively (called-interactively-p 'any)))
     (cl-flet* ((to-string (val) (if (numberp val) (number-to-string val) val))
-
-	       ;; extract the relevant fields from each issue, join with a comma (,) and split with a newline (\n)
-	       (build-row (issue)
-			  ;; TODO: add keymap to visit issue in browser on <Enter>
-			  (let ((params '("number" "created_at" "title")))
-			    (string-join (mapcar (lambda (param) (-> param
-								     (gethash issue)
-								     to-string))
-						 params)
-					 "\t")))
-	       ;; build number, age, title header
-	       (build-header ()
-			     (-> "number\tcreated_at\ttitle\n"
-				 (propertize 'read-only t)
-				 insert))
 	       ;; init buffer, add the header, and each row
 	       (build-table (pageable)
 			    (let ((issues (page pageable)))
@@ -281,17 +335,7 @@ copy to kill-ring. Otherwise, returns the link as a string."
 				(let ((buffer (-> args
 						  (plist-get :buffer)
 						  (or (get-buffer-create "*GitHub Issues*")))))
-				  (with-current-buffer buffer
-				    (read-only-mode)
-				    (let ((inhibit-read-only t))
-				      (erase-buffer)
-				      (build-header)
-				      (mapc (lambda (issue) (-> issue
-								build-row
-								(insert "\n")))
-					    issues)
-				      (goto-char (point-min))
-				      (display-buffer buffer)))))
+				  (display-table-in-buffer buffer issues '("number" "created_at" "title"))))
 			      issues)))
       (-> handle
 	  github-remote
