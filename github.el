@@ -229,14 +229,22 @@ COLUMNS-TO-KEEP is a list of keys (strings) of properties that will be calculate
 	    rows)
       max-column-widths)))
 
+;; https://stackoverflow.com/questions/38147620/shell-script-to-open-a-url
+(defun visit-url-in-browser (url)
+  "Open URL in your system browser using shell commands."
+  (cond ((eq system-type 'gnu/linux) (shell-command (format "xdg-open %s" url)))
+	((eq system-type 'darwin) (shell-command (format "open %s" url)))
+	((eq system-type 'windows) (shell-command (format "start %s" url)))
+	(t (error "Unsupported system-type: %s" system-type))))
+
 (defun display-table-in-buffer (buffer rows columns-to-keep)
-  "Given a sequence of hashtables ROWS, display COLUMNS-TO-KEEP in BUFFER."
+  "Given a sequence of hashtables ROWS, display COLUMNS-TO-KEEP in BUFFER. Clicking on
+or pressing ENTER on any text will open the respective page in the browser."
   ;; TODO: pass in params for keybindings:
-  ;;   1. <Enter> to visit URL in browser
-  ;;   2. <p> for previous page (if available)
-  ;;   3. <n> for next page (if available)
-  ;;   4. <f> for first page (if not already on first page)
-  ;;   5. <l> for last page (if not already on last page)
+  ;;   1. <p> for previous page (if available)
+  ;;   2. <n> for next page (if available)
+  ;;   3. <f> for first page (if not already on first page)
+  ;;   4. <l> for last page (if not already on last page)
   (with-current-buffer buffer
     (read-only-mode)
     (let ((inhibit-read-only t))
@@ -254,10 +262,15 @@ COLUMNS-TO-KEEP is a list of keys (strings) of properties that will be calculate
 							(list
 							 (number-to-string rownum)
 							 (vconcat (mapcar (lambda (key)
-									    (let ((value (gethash key row)))
-									      (if (numberp value)
-										  (number-to-string value)
-										value)))
+									    (let* ((value (gethash key row))
+										   (cast-value (if (numberp value) (number-to-string value) value)))
+									      (cons
+									       cast-value
+									       (list
+										'action `(lambda (x)
+											   (-> "html_url"
+											       (gethash ,row)
+											       visit-url-in-browser))))))
 									  column-header-names)))))
 						    rows))))
 	(erase-buffer)
