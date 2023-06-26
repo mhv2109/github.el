@@ -207,28 +207,6 @@ or simply return VAL otherwise."
 ;; http://rgrinberg.com/posts/emacs-table-display/
 ;; https://stackoverflow.com/questions/11272632/how-to-create-a-column-view-in-emacs-lisp
 
-(defun make-tabulated-headers (rows columns-to-keep)
-  "Given a list of hashtables (ROWS) calculate the max width of each column (keys of each hashtable).
-COLUMNS-TO-KEEP is a list of keys (strings) of properties that will be calculated."
-  (let ((max-column-widths (make-hash-table :test 'equal)))
-    (cl-flet* ((keep-column (column)
-			    (member column columns-to-keep))
-	       (process-row (row)
-			    (maphash (lambda (key value)
-				       (if (keep-column key)
-					   (let* ((column-name-width (length key))
-						  (this-value (length (-> value
-									  stringp
-									  (if value (number-to-string value)))))
-						  (current-value (gethash key max-column-widths column-name-width))
-						  (max-value (max this-value current-value)))
-					     (puthash key max-value max-column-widths))))
-				     row)))
-      (mapc (lambda (row)
-	      (process-row row))
-	    rows)
-      max-column-widths)))
-
 ;; https://stackoverflow.com/questions/38147620/shell-script-to-open-a-url
 (defun visit-url-in-browser (url)
   "Open URL in your system browser using shell commands."
@@ -237,24 +215,15 @@ COLUMNS-TO-KEEP is a list of keys (strings) of properties that will be calculate
 	((eq system-type 'windows) (shell-command (format "start %s" url)))
 	(t (error "Unsupported system-type: %s" system-type))))
 
-(defun display-table-in-buffer (buffer rows columns-to-keep)
+(defun display-table-in-buffer (buffer rows columns-to-keep mode)
   "Given a sequence of hashtables ROWS, display COLUMNS-TO-KEEP in BUFFER. Clicking on
-or pressing ENTER on any text will open the respective page in the browser."
-  ;; TODO: pass in params for keybindings:
-  ;;   1. <p> for previous page (if available)
-  ;;   2. <n> for next page (if available)
-  ;;   3. <f> for first page (if not already on first page)
-  ;;   4. <l> for last page (if not already on last page)
+or pressing ENTER on any text will open the respective page in the browser. MODE should
+be a quoted variable of a major mode that extends tabulated-list-mode."
+  
   (with-current-buffer buffer
     (read-only-mode)
     (let ((inhibit-read-only t))
-      (let* ((column-header-names-width (make-tabulated-headers rows columns-to-keep))
-	     (column-header-names columns-to-keep)
-	     (this-tabulated-list-format (vconcat (mapcar (lambda (name)
-							    (list name
-								  (gethash name column-header-names-width)
-								  t))
-							  column-header-names)))
+      (let* ((column-header-names columns-to-keep)
 	     (this-tabulated-list-entries (let ((rownum 0))
 					    (mapcar (lambda (row)
 						      (progn
@@ -274,12 +243,8 @@ or pressing ENTER on any text will open the respective page in the browser."
 									  column-header-names)))))
 						    rows))))
 	(erase-buffer)
-	(tabulated-list-mode)
-	(setq tabulated-list-format this-tabulated-list-format)
-	(setq tabulated-list-padding 2)
-	(tabulated-list-init-header)
 	(setq tabulated-list-entries this-tabulated-list-entries)
-	(tabulated-list-print t)
+	(funcall mode)
 	(goto-char (point-min))
 	(display-buffer buffer)))))
 
@@ -334,25 +299,51 @@ copy to kill-ring. Otherwise, returns the link as a string."
 ;; Issues
 ;;
 
+(defvar github-project-issues-tabulated-list-format
+  [("number" 20 t) ;; most-positive-fixnum string repr on my system has length 19
+   ("created_at" 21 t) ;; pretty sure the timestamp format always has length 20
+   ("title" 256 t)]    ;; 256 length was chosen arbitrarily
+  )
+
+;; TODO: var for next issues page
+;; TODO: var for previous issues page
+;; TODO: var for first issues page
+;; TODO: var for last issues page
+
+(define-derived-mode github-issues-mode tabulated-list-mode "github-issues-mode" "Major mode for viewing GitHub Issues."
+ (setq tabulated-list-format github-project-issues-tabulated-list-format) 
+ (setq tabulated-list-padding 2)
+ (tabulated-list-init-header)
+ (tabulated-list-print t)
+ ;; TODO: <p> for previous page (if available)
+ ;; TODO: <n> for next page (if available)
+ ;; TODO: <f> for first page (if not already on first page)
+ ;; TODO: <l> for last page (if not already on last page)
+ )
+
+(defun github-project-issues-display-table-in-buffer (pageable &rest kwargs)
+  (let ((issues (page pageable))
+	(buffer (-> kwargs
+		    (plist-get :buffer)
+		    (or (get-buffer-create "*GitHub Issues*"))))
+	(columns-to-keep (mapcar (lambda (item)
+				   (car item))
+				 github-project-issues-tabulated-list-format)))
+    (display-table-in-buffer buffer issues columns-to-keep 'github-issues-mode)
+    ;; TODO: set var for next issues page
+    ;; TODO: set var for previous issues page
+    ;; TODO: set var for first issues page
+    ;; TODO: set var for last issues page
+    ))
+
 (defun github-project-issues (&optional handle &rest args)
   "List all open issues in buffer named *GitHub Issues*."
   (-> (read-string "Handle: " "origin")
       list
       interactive)
-  (let ((called-interactively (called-interactively-p 'any)))
-    (cl-flet* ((to-string (val) (if (numberp val) (number-to-string val) val))
-	       ;; init buffer, add the header, and each row
-	       (build-table (pageable)
-			    (let ((issues (page pageable)))
-			      (when called-interactively
-				(let ((buffer (-> args
-						  (plist-get :buffer)
-						  (or (get-buffer-create "*GitHub Issues*")))))
-				  (display-table-in-buffer buffer issues '("number" "created_at" "title"))))
-			      issues)))
-      (-> handle
-	  github-remote
-	  github-get-issues
-	  build-table))))
+  (-> handle
+      github-remote
+      github-get-issues
+      github-project-issues-display-table-in-buffer))
 
 (provide 'github)
