@@ -26,7 +26,13 @@ See: https://docs.github.com/en/authentication/keeping-your-account-and-data-sec
     :accessor next-link)
    (prev-link
     :initarg :prev-link 
-    :accessor prev-link))
+    :accessor prev-link)
+   (first-link
+    :initarg :first-link
+    :accessor first-link)
+   (last-link
+    :initarg :last-link
+    :accessor last-link))
   (:documentation "https://docs.github.com/en/rest/guides/using-pagination-in-the-rest-api?apiVersion=2022-11-28#using-link-headers"))
 
 (defun make-github-pageable (&rest args)
@@ -46,7 +52,9 @@ See: https://docs.github.com/en/rest/guides/using-pagination-in-the-rest-api?api
       (make-instance github-pageable
 		     :page (json-parse-string body)
 		     :next-link (extract-link "next")
-		     :prev-link (extract-link "prev")))))
+		     :prev-link (extract-link "prev")
+		     :first-link (extract-link "first")
+		     :last-link (extract-link "last")))))
 
 (cl-defgeneric pageable-next-page (pageable)
   (:documentation "Returns the next PAGEABLE using PAGEABLE's next-link"))
@@ -85,6 +93,18 @@ See: https://docs.github.com/en/rest/guides/using-pagination-in-the-rest-api?api
       (let ((headers (buffer-substring (point-min) url-http-end-of-headers))
 	    (body (buffer-substring url-http-end-of-headers (point-max))))
 	(list :headers headers :body body)))))
+
+(defun github-get (url)
+  (github-req "GET" url))
+
+(defun github-get-pageable (url)
+  (->> (-> url
+	   github-get)
+       (apply 'make-github-pageable)))
+
+(defun github-get-pageable-if (url)
+  (if url
+      (github-get-pageable url)))
 
 (defun github-req-path (method path)
   "Make a request to GitHub's API. METHOD is the HTTP method and PATH is the HTTP request path. Uses GITHUB-API-BASE-URL."
@@ -188,7 +208,9 @@ or simply return VAL otherwise."
 			    ((string-match "^[ssh://]?git@github\.com:.*/\\(.*\\)\.git$" remote) (pluck-match remote))
 			    ;; default -- no match
 			    (t nil))))
-    (extract-from url)))
+    (-> url
+	extract-from
+	(string-trim-right ".git[ \t\n\r]*"))))
 
 (defun github-commit-url-format-string (commit)
   "Builds a format string for COMMIT, in long SHA form."
@@ -305,36 +327,58 @@ copy to kill-ring. Otherwise, returns the link as a string."
    ("title" 256 t)]    ;; 256 length was chosen arbitrarily
   )
 
-;; TODO: var for next issues page
-;; TODO: var for previous issues page
-;; TODO: var for first issues page
-;; TODO: var for last issues page
+(defvar github-project-next-issues-url nil)
+(defvar github-project-prev-issues-url nil)
+(defvar github-project-first-issues-url nil)
+(defvar github-project-last-issues-url nil)
 
 (define-derived-mode github-issues-mode tabulated-list-mode "github-issues-mode" "Major mode for viewing GitHub Issues."
- (setq tabulated-list-format github-project-issues-tabulated-list-format) 
- (setq tabulated-list-padding 2)
- (tabulated-list-init-header)
- (tabulated-list-print t)
- ;; TODO: <p> for previous page (if available)
- ;; TODO: <n> for next page (if available)
- ;; TODO: <f> for first page (if not already on first page)
- ;; TODO: <l> for last page (if not already on last page)
- )
+  (setq tabulated-list-format github-project-issues-tabulated-list-format) 
+  (setq tabulated-list-padding 2)
+  (tabulated-list-init-header)
+  (tabulated-list-print t))
+
+(define-key github-issues-mode-map (kbd "p") (lambda ()
+    					       (interactive)
+					       (let ((pageable (github-get-pageable-if github-project-prev-issues-url)))
+						 (if pageable
+						     (github-project-issues-display-table-in-buffer pageable)))))
+
+(define-key github-issues-mode-map (kbd "n") (lambda ()
+    						 (interactive)
+    						 (let ((pageable (github-get-pageable-if github-project-next-issues-url)))
+						   (if pageable
+						       (github-project-issues-display-table-in-buffer pageable)))))
+
+(define-key github-issues-mode-map (kbd "f") (lambda ()
+    						 (interactive)
+    						 (let ((pageable (github-get-pageable-if github-project-first-issues-url)))
+						   (if pageable
+						       (github-project-issues-display-table-in-buffer pageable)))))
+
+(define-key github-issues-mode-map (kbd "l") (lambda ()
+    						 (interactive)
+    						 (let ((pageable (github-get-pageable-if github-project-last-issues-url)))
+						   (if pageable
+						       (github-project-issues-display-table-in-buffer pageable)))))
 
 (defun github-project-issues-display-table-in-buffer (pageable &rest kwargs)
   (let ((issues (page pageable))
+	(next (next-link pageable))
+	(prev (prev-link pageable))
+	(first (first-link pageable))
+	(last (last-link pageable))
 	(buffer (-> kwargs
 		    (plist-get :buffer)
 		    (or (get-buffer-create "*GitHub Issues*"))))
 	(columns-to-keep (mapcar (lambda (item)
 				   (car item))
 				 github-project-issues-tabulated-list-format)))
-    (display-table-in-buffer buffer issues columns-to-keep 'github-issues-mode)
-    ;; TODO: set var for next issues page
-    ;; TODO: set var for previous issues page
-    ;; TODO: set var for first issues page
-    ;; TODO: set var for last issues page
-    ))
+    (setq github-project-next-issues-url next)
+    (setq github-project-prev-issues-url prev)
+    (setq github-project-first-issues-url first)
+    (setq github-project-last-issues-url last)
+    (display-table-in-buffer buffer issues columns-to-keep 'github-issues-mode)))
 
 (defun github-project-issues (&optional handle &rest args)
   "List all open issues in buffer named *GitHub Issues*."
