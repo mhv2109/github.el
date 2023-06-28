@@ -123,6 +123,13 @@ See: https://docs.github.com/en/rest/guides/using-pagination-in-the-rest-api?api
        github-get-path
        (apply 'make-github-pageable)))
 
+(defun github-get-pull-requests (remote)
+  (->> '(github-user-org github-project-name)
+       (mapcar (lambda (f) (funcall f remote)))
+       (apply 'format "repos/%s/%s/pulls")
+       github-get-path
+       (apply 'make-github-pageable)))
+
 ;;
 ;; Lib
 ;;
@@ -389,5 +396,78 @@ copy to kill-ring. Otherwise, returns the link as a string."
       github-remote
       github-get-issues
       github-project-issues-display-table-in-buffer))
+
+;;
+;; Pull Requests
+;;
+
+(defvar github-project-pull-requests-tabulated-list-format
+  [("number" 20 t) ;; most-positive-fixnum string repr on my system has length 19
+   ("created_at" 21 t) ;; pretty sure the timestamp format always has length 20
+   ("title" 256 t)]    ;; 256 length was chosen arbitrarily
+  )
+
+(defvar github-project-next-pull-requests-url nil)
+(defvar github-project-prev-pull-requests-url nil)
+(defvar github-project-first-pull-requests-url nil)
+(defvar github-project-last-pull-requests-url nil)
+
+(define-derived-mode github-pull-requests-mode tabulated-list-mode "github-pull-requests-mode" "Major mode for viewing GitHub Pull Requests."
+  (setq tabulated-list-format github-project-pull-requests-tabulated-list-format) 
+  (setq tabulated-list-padding 2)
+  (tabulated-list-init-header)
+  (tabulated-list-print t))
+
+(define-key github-issues-mode-map (kbd "p") (lambda ()
+    					       (interactive)
+					       (let ((pageable (github-get-pageable-if github-project-prev-pull-requests-url)))
+						 (if pageable
+						     (github-project-pull-requests-display-table-in-buffer pageable)))))
+
+(define-key github-issues-mode-map (kbd "n") (lambda ()
+    						 (interactive)
+    						 (let ((pageable (github-get-pageable-if github-project-next-pull-requests-url)))
+						   (if pageable
+						       (github-project-pull-requests-display-table-in-buffer pageable)))))
+
+(define-key github-issues-mode-map (kbd "f") (lambda ()
+    						 (interactive)
+    						 (let ((pageable (github-get-pageable-if github-project-first-pull-requests-url)))
+						   (if pageable
+						       (github-project-pull-requests-display-table-in-buffer pageable)))))
+
+(define-key github-issues-mode-map (kbd "l") (lambda ()
+    						 (interactive)
+    						 (let ((pageable (github-get-pageable-if github-project-last-pull-requests-url)))
+						   (if pageable
+						       (github-project-pull-requests-display-table-in-buffer pageable)))))
+
+(defun github-project-pull-requests-display-table-in-buffer (pageable &rest kwargs)
+  (let ((prs (page pageable))
+	(next (next-link pageable))
+	(prev (prev-link pageable))
+	(first (first-link pageable))
+	(last (last-link pageable))
+	(buffer (-> kwargs
+		    (plist-get :buffer)
+		    (or (get-buffer-create "*GitHub Pull Requests*"))))
+	(columns-to-keep (mapcar (lambda (item)
+				   (car item))
+				 github-project-pull-requests-tabulated-list-format)))
+    (setq github-project-next-pull-requests-url next)
+    (setq github-project-prev-pull-requests-url prev)
+    (setq github-project-first-pull-requests-url first)
+    (setq github-project-last-pull-requests-url last)
+    (display-table-in-buffer buffer prs columns-to-keep 'github-issues-mode)))
+
+(defun github-project-pull-requests (&optional handle &rest args)
+  "List all open issues in buffer named *GitHub Pull Requests*."
+  (-> (read-string "Handle: " "origin")
+      list
+      interactive)
+  (-> handle
+      github-remote
+      github-get-pull-requests
+      github-project-pull-requests-display-table-in-buffer))
 
 (provide 'github)
