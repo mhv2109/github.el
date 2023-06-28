@@ -119,7 +119,7 @@ See: https://docs.github.com/en/rest/guides/using-pagination-in-the-rest-api?api
 (defun github-get-issues (remote)
   (->> '(github-user-org github-project-name)
        (mapcar (lambda (f) (funcall f remote)))
-       (apply 'format "repos/%s/%s/issues")
+       (apply 'format "repos/%s/%s/issues?pulls=false") ;; pulls=false omits pull requests
        github-get-path
        (apply 'make-github-pageable)))
 
