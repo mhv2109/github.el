@@ -7,3 +7,8 @@
 - `github-project-permalink`
 - `github-file-permalink`
 - `github-permalink-at-point`
+- `github-project-issues`
+- `github-project-pull-requests`
+- `github-project-releases`
+
+When viewing tabulated results in a buffer, you can navigate to the next, previous, first, or last page with the "n", "p", "f", and "l" keys, respectively.

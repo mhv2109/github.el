@@ -1,3 +1,5 @@
+;;;  -*- lexical-binding: t -*-
+
 ;;
 ;; Global variables
 ;;
@@ -56,24 +58,6 @@ See: https://docs.github.com/en/rest/guides/using-pagination-in-the-rest-api?api
 		     :first-link (extract-link "first")
 		     :last-link (extract-link "last")))))
 
-(cl-defgeneric pageable-next-page (pageable)
-  (:documentation "Returns the next PAGEABLE using PAGEABLE's next-link"))
-
-(cl-defgeneric pageable-prev-page (pageable)
-  (:documentation "Returns the next PAGEABLE using PAGEABLE's prev-link"))
-
-(cl-defmethod pageable-next-page ((pageable github-pageable))
-  (-> pageable
-      next-link
-      (github-req "GET")
-      make-github-pageable))
-
-(cl-defmethod pageable-prev-page ((pageable github-pageable))
-  (-> pageable
-      prev-link
-      (github-req "GET")
-      make-github-pageable))
-
 (defun github-req (method url)
   "Make a request with http method METHOD to URL that set's the required headers for the GitHub API. Returns HEADERS and BODY as a plist with symbol keys."
   (message (format "Making GitHub Request: %s\t%s" method url))
@@ -127,6 +111,13 @@ See: https://docs.github.com/en/rest/guides/using-pagination-in-the-rest-api?api
   (->> '(github-user-org github-project-name)
        (mapcar (lambda (f) (funcall f remote)))
        (apply 'format "repos/%s/%s/pulls")
+       github-get-path
+       (apply 'make-github-pageable)))
+
+(defun github-get-releases (remote)
+  (->> '(github-user-org github-project-name)
+       (mapcar (lambda (f) (funcall f remote)))
+       (apply 'format "repos/%s/%s/releases")
        github-get-path
        (apply 'make-github-pageable)))
 
@@ -230,53 +221,6 @@ or simply return VAL otherwise."
 			     (if "" "/"))))
     (concat github-base-url trailing-slash user-org "/" project-name "/%s/" commit)))
 
-;; Links for resources on tabulated-list-mode
-;;
-;; https://www.gnu.org/software/emacs/manual/html_node/elisp/Tabulated-List-Mode.html
-;; http://rgrinberg.com/posts/emacs-table-display/
-;; https://stackoverflow.com/questions/11272632/how-to-create-a-column-view-in-emacs-lisp
-
-;; https://stackoverflow.com/questions/38147620/shell-script-to-open-a-url
-(defun visit-url-in-browser (url)
-  "Open URL in your system browser using shell commands."
-  (cond ((eq system-type 'gnu/linux) (shell-command (format "xdg-open %s" url)))
-	((eq system-type 'darwin) (shell-command (format "open %s" url)))
-	((eq system-type 'windows) (shell-command (format "start %s" url)))
-	(t (error "Unsupported system-type: %s" system-type))))
-
-(defun display-table-in-buffer (buffer rows columns-to-keep mode)
-  "Given a sequence of hashtables ROWS, display COLUMNS-TO-KEEP in BUFFER. Clicking on
-or pressing ENTER on any text will open the respective page in the browser. MODE should
-be a quoted variable of a major mode that extends tabulated-list-mode."
-  
-  (with-current-buffer buffer
-    (read-only-mode)
-    (let ((inhibit-read-only t))
-      (let* ((column-header-names columns-to-keep)
-	     (this-tabulated-list-entries (let ((rownum 0))
-					    (mapcar (lambda (row)
-						      (progn
-							(setq rownum (+ 1 rownum))
-							(list
-							 (number-to-string rownum)
-							 (vconcat (mapcar (lambda (key)
-									    (let* ((value (gethash key row))
-										   (cast-value (if (numberp value) (number-to-string value) value)))
-									      (cons
-									       cast-value
-									       (list
-										'action `(lambda (x)
-											   (-> "html_url"
-											       (gethash ,row)
-											       visit-url-in-browser))))))
-									  column-header-names)))))
-						    rows))))
-	(erase-buffer)
-	(setq tabulated-list-entries this-tabulated-list-entries)
-	(funcall mode)
-	(goto-char (point-min))
-	(display-buffer buffer)))))
-
 ;;
 ;; Permalinks
 ;;
@@ -325,6 +269,115 @@ copy to kill-ring. Otherwise, returns the link as a string."
 	    (print-or-return permalink))))))
 
 ;;
+;; Table
+;;
+
+;; Links for resources on tabulated-list-mode
+;;
+;; https://www.gnu.org/software/emacs/manual/html_node/elisp/Tabulated-List-Mode.html
+;; http://rgrinberg.com/posts/emacs-table-display/
+;; https://stackoverflow.com/questions/11272632/how-to-create-a-column-view-in-emacs-lisp
+
+;; https://stackoverflow.com/questions/38147620/shell-script-to-open-a-url
+(defun visit-url-in-browser (url)
+  "Open URL in your system browser using shell commands."
+  (cond ((eq system-type 'gnu/linux) (shell-command (format "xdg-open %s" url)))
+	((eq system-type 'darwin) (shell-command (format "open %s" url)))
+	((eq system-type 'windows) (shell-command (format "start %s" url)))
+	(t (error "Unsupported system-type: %s" system-type))))
+
+(defun display-table-in-buffer (buffer rows columns-to-keep mode)
+  "Given a sequence of hashtables ROWS, display COLUMNS-TO-KEEP in BUFFER. Clicking on
+or pressing ENTER on any text will open the respective page in the browser. MODE should
+be a quoted variable of a major mode that extends tabulated-list-mode."
+  (with-current-buffer buffer
+    (read-only-mode)
+    (let ((inhibit-read-only t))
+      (let* ((column-header-names columns-to-keep)
+	     (this-tabulated-list-entries (let ((rownum 0))
+					    (mapcar (lambda (row)
+						      (progn
+							(setq rownum (+ 1 rownum))
+							(list
+							 (number-to-string rownum)
+							 (vconcat (mapcar (lambda (key)
+									    (let* ((value (gethash key row))
+										   (cast-value (if (numberp value) (number-to-string value) value)))
+									      (cons
+									       cast-value
+									       (list
+										'action `(lambda (x)
+											   (-> "html_url"
+											       (gethash ,row)
+											       visit-url-in-browser))))))
+									  column-header-names)))))
+						    rows))))
+	(erase-buffer)
+	(setq tabulated-list-entries this-tabulated-list-entries)
+	(funcall mode)
+	(goto-char (point-min))
+	(display-buffer buffer)))))
+
+(defclass github-table ()
+  ((pageable
+    :initarg :pageable
+    :accessor pageable)
+   (table-buffer
+    :initarg :table-buffer
+    :accessor table-buffer)
+   (table-columns
+    :initarg :table-columns
+    :accessor table-columns)
+   (table-mode
+    :initarg :table-mode
+    :accessor table-mode))
+  (:documentation "Represents the state of a displayed table."))
+
+(cl-defgeneric github-table-next (table)
+  (:documentation "Get the next TABLE."))
+
+(cl-defgeneric github-table-prev (table)
+  (:documentation "Get the previous TABLE."))
+
+(cl-defgeneric github-table-first (table)
+  (:documentation "Get the first TABLE."))
+
+(cl-defgeneric github-table-last (table)
+  (:documentation "Get the last TABLE."))
+
+(cl-defgeneric github-table-display-table-in-buffer (table)
+  (:documentation "Display the TABLE in TABLE's TABLE-BUFFER keeping only TABLE-COLUMNS. TABLE-MODE is a quoted symbol of a mode derived from tabulated-list-mode."))
+
+(cl-defmethod github-table-display-table-in-buffer ((table github-table))
+  (display-table-in-buffer
+   (table-buffer table)
+   (-> table
+       pageable
+       page)
+   (table-columns table)
+   (table-mode table)))
+
+(cl-flet ((make-if (tbl pf)
+		   (let ((np (->> tbl
+				  pageable
+				  (funcall pf)
+				  github-get-pageable-if)))
+		     (when np
+		       (make-instance github-table
+			:pageable np
+			:table-buffer (table-buffer tbl)
+			:table-columns (table-columns tbl)
+			:table-mode (table-mode tbl))))))
+  (cl-defmethod github-table-next ((table github-table))
+    (make-if table 'next-link))
+  (cl-defmethod github-table-prev ((table github-table))
+    (make-if table 'prev-link))
+  (cl-defmethod github-table-first ((table github-table))
+    (make-if table 'first-link))
+  (cl-defmethod github-table-last ((table github-table))
+    (make-if table 'last-link)))
+
+;;
 ;; Issues
 ;;
 
@@ -334,68 +387,47 @@ copy to kill-ring. Otherwise, returns the link as a string."
    ("title" 256 t)]    ;; 256 length was chosen arbitrarily
   )
 
-(defvar github-project-next-issues-url nil)
-(defvar github-project-prev-issues-url nil)
-(defvar github-project-first-issues-url nil)
-(defvar github-project-last-issues-url nil)
-
 (define-derived-mode github-issues-mode tabulated-list-mode "github-issues-mode" "Major mode for viewing GitHub Issues."
   (setq tabulated-list-format github-project-issues-tabulated-list-format) 
   (setq tabulated-list-padding 2)
   (tabulated-list-init-header)
   (tabulated-list-print t))
 
-(define-key github-issues-mode-map (kbd "p") (lambda ()
-    					       (interactive)
-					       (let ((pageable (github-get-pageable-if github-project-prev-issues-url)))
-						 (if pageable
-						     (github-project-issues-display-table-in-buffer pageable)))))
+(defvar github-issues-current-table nil)
 
-(define-key github-issues-mode-map (kbd "n") (lambda ()
-    						 (interactive)
-    						 (let ((pageable (github-get-pageable-if github-project-next-issues-url)))
-						   (if pageable
-						       (github-project-issues-display-table-in-buffer pageable)))))
+(cl-flet ((handler (f)
+		   (lambda ()
+		     (interactive)
+		     (let ((nt (funcall f github-issues-current-table)))
+		       (when nt
+			 (github-table-display-table-in-buffer nt) 
+			 (setq github-issues-current-table nt))))))
+  (define-key github-issues-mode-map (kbd "p") (handler 'github-table-prev))
+  (define-key github-issues-mode-map (kbd "n") (handler 'github-table-next))
+  (define-key github-issues-mode-map (kbd "f") (handler 'github-table-first))
+  (define-key github-issues-mode-map (kbd "l") (handler 'github-table-last)))
 
-(define-key github-issues-mode-map (kbd "f") (lambda ()
-    						 (interactive)
-    						 (let ((pageable (github-get-pageable-if github-project-first-issues-url)))
-						   (if pageable
-						       (github-project-issues-display-table-in-buffer pageable)))))
-
-(define-key github-issues-mode-map (kbd "l") (lambda ()
-    						 (interactive)
-    						 (let ((pageable (github-get-pageable-if github-project-last-issues-url)))
-						   (if pageable
-						       (github-project-issues-display-table-in-buffer pageable)))))
-
-(defun github-project-issues-display-table-in-buffer (pageable &rest kwargs)
-  (let ((issues (page pageable))
-	(next (next-link pageable))
-	(prev (prev-link pageable))
-	(first (first-link pageable))
-	(last (last-link pageable))
-	(buffer (-> kwargs
-		    (plist-get :buffer)
-		    (or (get-buffer-create "*GitHub Issues*"))))
-	(columns-to-keep (mapcar (lambda (item)
-				   (car item))
-				 github-project-issues-tabulated-list-format)))
-    (setq github-project-next-issues-url next)
-    (setq github-project-prev-issues-url prev)
-    (setq github-project-first-issues-url first)
-    (setq github-project-last-issues-url last)
-    (display-table-in-buffer buffer issues columns-to-keep 'github-issues-mode)))
-
-(defun github-project-issues (&optional handle &rest args)
+(defun github-project-issues (&optional handle &rest kwargs)
   "List all open issues in buffer named *GitHub Issues*."
   (-> (read-string "Handle: " "origin")
       list
       interactive)
-  (-> handle
-      github-remote
-      github-get-issues
-      github-project-issues-display-table-in-buffer))
+  (let* ((buffer (-> kwargs
+		    (plist-get :buffer)
+		    (or (get-buffer-create "*GitHub Issues*"))))
+	(columns-to-keep (mapcar (lambda (item)
+				   (car item))
+				 github-project-issues-tabulated-list-format))
+	(pageable (-> handle
+		      github-remote
+		      github-get-issues))
+	(tbl (make-instance github-table
+			  :pageable pageable
+			  :table-buffer buffer
+			  :table-columns columns-to-keep
+			  :table-mode 'github-issues-mode)))
+    (github-table-display-table-in-buffer tbl)
+    (setq github-issues-current-table tbl)))
 
 ;;
 ;; Pull Requests
@@ -407,67 +439,100 @@ copy to kill-ring. Otherwise, returns the link as a string."
    ("title" 256 t)]    ;; 256 length was chosen arbitrarily
   )
 
-(defvar github-project-next-pull-requests-url nil)
-(defvar github-project-prev-pull-requests-url nil)
-(defvar github-project-first-pull-requests-url nil)
-(defvar github-project-last-pull-requests-url nil)
-
 (define-derived-mode github-pull-requests-mode tabulated-list-mode "github-pull-requests-mode" "Major mode for viewing GitHub Pull Requests."
   (setq tabulated-list-format github-project-pull-requests-tabulated-list-format) 
   (setq tabulated-list-padding 2)
   (tabulated-list-init-header)
   (tabulated-list-print t))
 
-(define-key github-issues-mode-map (kbd "p") (lambda ()
-    					       (interactive)
-					       (let ((pageable (github-get-pageable-if github-project-prev-pull-requests-url)))
-						 (if pageable
-						     (github-project-pull-requests-display-table-in-buffer pageable)))))
+(defvar github-pull-requests-current-table nil)
 
-(define-key github-issues-mode-map (kbd "n") (lambda ()
-    						 (interactive)
-    						 (let ((pageable (github-get-pageable-if github-project-next-pull-requests-url)))
-						   (if pageable
-						       (github-project-pull-requests-display-table-in-buffer pageable)))))
+(cl-flet ((handler (f)
+		   (lambda ()
+		     (interactive)
+		     (let ((nt (funcall f github-pull-requests-current-table)))
+		       (when nt
+			 (github-table-display-table-in-buffer nt) 
+			 (setq github-pull-requests-current-table nt))))))
+  (define-key github-pull-requests-mode-map (kbd "p") (handler 'github-table-prev))
+  (define-key github-pull-requests-mode-map (kbd "n") (handler 'github-table-next))
+  (define-key github-pull-requests-mode-map (kbd "f") (handler 'github-table-first))
+  (define-key github-pull-requests-mode-map (kbd "l") (handler 'github-table-last)))
 
-(define-key github-issues-mode-map (kbd "f") (lambda ()
-    						 (interactive)
-    						 (let ((pageable (github-get-pageable-if github-project-first-pull-requests-url)))
-						   (if pageable
-						       (github-project-pull-requests-display-table-in-buffer pageable)))))
-
-(define-key github-issues-mode-map (kbd "l") (lambda ()
-    						 (interactive)
-    						 (let ((pageable (github-get-pageable-if github-project-last-pull-requests-url)))
-						   (if pageable
-						       (github-project-pull-requests-display-table-in-buffer pageable)))))
-
-(defun github-project-pull-requests-display-table-in-buffer (pageable &rest kwargs)
-  (let ((prs (page pageable))
-	(next (next-link pageable))
-	(prev (prev-link pageable))
-	(first (first-link pageable))
-	(last (last-link pageable))
-	(buffer (-> kwargs
-		    (plist-get :buffer)
-		    (or (get-buffer-create "*GitHub Pull Requests*"))))
-	(columns-to-keep (mapcar (lambda (item)
-				   (car item))
-				 github-project-pull-requests-tabulated-list-format)))
-    (setq github-project-next-pull-requests-url next)
-    (setq github-project-prev-pull-requests-url prev)
-    (setq github-project-first-pull-requests-url first)
-    (setq github-project-last-pull-requests-url last)
-    (display-table-in-buffer buffer prs columns-to-keep 'github-issues-mode)))
-
-(defun github-project-pull-requests (&optional handle &rest args)
-  "List all open issues in buffer named *GitHub Pull Requests*."
+(defun github-project-pull-requests (&optional handle &rest kwargs)
+  "List all open Pull Requests in buffer named *GitHub Pull Requests*."
   (-> (read-string "Handle: " "origin")
       list
       interactive)
-  (-> handle
-      github-remote
-      github-get-pull-requests
-      github-project-pull-requests-display-table-in-buffer))
+  (let* ((buffer (-> kwargs
+		     (plist-get :buffer)
+		     (or (get-buffer-create "*GitHub Pull Requests*"))))
+	 (columns-to-keep (mapcar (lambda (item)
+				    (car item))
+				  github-project-pull-requests-tabulated-list-format))
+	 (pageable (-> handle
+		       github-remote
+		       github-get-pull-requests))
+	 (tbl (make-instance github-table
+			     :pageable pageable
+			     :table-buffer buffer
+			     :table-columns columns-to-keep
+			     :table-mode 'github-pull-requests-mode)))
+    (github-table-display-table-in-buffer tbl)
+    (setq github-issues-current-table tbl)))
+
+;;
+;; Releases
+;;
+
+(defvar github-project-releases-tabulated-list-format
+  [("id" 20 t) ;; most-positive-fixnum string repr on my system has length 19
+   ("created_at" 21 t) ;; pretty sure the timestamp format always has length 20
+   ("tag_name" 16 t) ;; 16 length was chosen arbitrarily
+   ("name" 16 t) ;; 16 length was chosen arbitrarily
+   ("body" 128 t)] ;; 128 length was chosen arbitrarily
+  )
+
+(define-derived-mode github-releases-mode tabulated-list-mode "github-releases-mode" "Major mode for viewing GitHub Releases."
+  (setq tabulated-list-format github-project-releases-tabulated-list-format) 
+  (setq tabulated-list-padding 2)
+  (tabulated-list-init-header)
+  (tabulated-list-print t))
+
+(defvar github-releases-current-table nil)
+
+(cl-flet ((handler (f)
+		   (lambda ()
+		     (interactive)
+		     (let ((nt (funcall f github-releases-current-table)))
+		       (when nt
+			 (github-table-display-table-in-buffer nt) 
+			 (setq github-releases-current-table nt))))))
+  (define-key github-releases-mode-map (kbd "p") (handler 'github-table-prev))
+  (define-key github-releases-mode-map (kbd "n") (handler 'github-table-next))
+  (define-key github-releases-mode-map (kbd "f") (handler 'github-table-first))
+  (define-key github-releases-mode-map (kbd "l") (handler 'github-table-last)))
+
+(defun github-project-releases (&optional handle &rest kwargs)
+  "List all Releases in buffer named *GitHub Releases*."
+  (-> (read-string "Handle: " "origin")
+      list
+      interactive)
+  (let* ((buffer (-> kwargs
+		     (plist-get :buffer)
+		     (or (get-buffer-create "*GitHub Releases*"))))
+	 (columns-to-keep (mapcar (lambda (item)
+				    (car item))
+				  github-project-releases-tabulated-list-format))
+	 (pageable (-> handle
+		       github-remote
+		       github-get-releases))
+	 (tbl (make-instance github-table
+			     :pageable pageable
+			     :table-buffer buffer
+			     :table-columns columns-to-keep
+			     :table-mode 'github-releases-mode)))
+    (github-table-display-table-in-buffer tbl)
+    (setq github-releases-current-table tbl)))
 
 (provide 'github)
