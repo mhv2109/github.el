@@ -12,3 +12,11 @@
 - `github-project-releases`
 
 When viewing tabulated results in a buffer, you can navigate to the next, previous, first, or last page with the "n", "p", "f", and "l" keys, respectively.
+
+## Installation
+Using [use-package](https://github.com/jwiegley/use-package):
+```elisp
+(add-to-list 'load-path "~/.emacs.d/github.el/") ;; installed as a Git submodule
+(use-package github
+  :ensure nil)
+```
