@@ -228,7 +228,7 @@ or simply return VAL otherwise."
 (defun github-project-permalink ()
   "Returns a permalink to the HEAD of the current file's project's ref. If called interactively,
  will print to minibuffer and copy to kill-ring. Otherwise, returns the link as a string."
-  (interactive "p")
+  (interactive)
   (let* ((res (-> (git-commit)
 		  github-commit-url-format-string
 		  (format "tree"))))
