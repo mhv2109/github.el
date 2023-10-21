@@ -149,23 +149,23 @@ or simply return VAL otherwise."
   "Get the GitHub (fetch) remote repositories for the current file as (NAME . URL) pairs. Works with https and ssh URLs."
   (with-current-buffer (current-buffer)
     (cl-flet* ((pluck-match (remote)
-			    (let ((handle (match-string 1 remote))
-				  (url (match-string 2 remote)))
-			      (cons handle url)))
-	       (extract (remote)
-			(cond
-			 ;; HTTP GH remotes
-			 ((string-match "^\\(.*\\)[[:space:]]+\\(https://github\.com.*\\)[[:space:]]+(fetch)$" remote) (pluck-match remote))
-			 ;; SSH GH remotes
-			 ((string-match "^\\(.*\\)[[:space:]]+\\([ssh://]?git@github\.com:.*\.git\\)[[:space:]]+(fetch)$" remote) (pluck-match remote))
-			 ;; default -- no remote
-			 (t nil)))
-	       (is-nil (item) (if item nil t)))
+			                (let ((handle (match-string 1 remote))
+				                  (url (match-string 2 remote)))
+			                  (cons handle url)))
+	           (extract (remote)
+			            (cond
+			             ;; HTTP GH remotes
+			             ((string-match "^\\(.*\\)[[:space:]]+\\(https://github\.com.*\\)[[:space:]]+(fetch)$" remote) (pluck-match remote))
+			             ;; SSH GH remotes
+			             ((string-match "^\\(.*\\)[[:space:]]+\\([ssh://]?git@github\.com:.*\.git\\)[[:space:]]+(fetch)$" remote) (pluck-match remote))
+			             ;; default -- no remote
+			             (t nil)))
+	           (is-nil (item) (if item nil t)))
       (let ((remotes (-> "git remote -v"
-			 shell-command-to-string
-			 (split-string "\n"))))
-	(->> (mapcar (lambda (remote) (extract remote)) remotes)
-	     (remove-if (lambda (item) (is-nil item))))))))
+			             shell-command-to-string
+			             (split-string "\n"))))
+	    (->> (mapcar (lambda (remote) (extract remote)) remotes)
+	         (cl-remove-if (lambda (item) (is-nil item))))))))
 
 (defun github-remote (&optional handle)
   "Get one GitHub (fetch) remote repository for the current file. Works with https and ssh URLs. HANDLE defaults to origin."
@@ -174,11 +174,11 @@ or simply return VAL otherwise."
       interactive)
   (cl-flet ((lookup-handle (handle) (assoc handle (github-remotes))))
     (let ((res (-> handle
-		   (if handle "origin")
-		   lookup-handle
-		   cdr)))
+		           (if handle "origin")
+		           lookup-handle
+		           cdr)))
       (-> (called-interactively-p 'any)
-	  (print-or-return res)))))
+	      (print-or-return res)))))
 
 (defun github-user-org (url)
   "Extracts GitHub User/Org from URL. Works with https and ssh URLs."
