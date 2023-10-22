@@ -42,48 +42,52 @@ See: https://docs.github.com/en/authentication/keeping-your-account-and-data-sec
 
 See: https://docs.github.com/en/rest/guides/using-pagination-in-the-rest-api?apiVersion=2022-11-28#using-link-headers"
   (let* ((body (plist-get args :body))
-	 (headers (plist-get args :headers))
-	 (regex-format-string-template "[,]?[[:space:]]+<\\([^<>]*\\)>;[[:space:]]+rel=\"%s\""))
+	     (headers (plist-get args :headers))
+	     (regex-format-string-template "[,]?[[:space:]]+<\\([^<>]*\\)>;[[:space:]]+rel=\"%s\""))
     (cl-flet* ((regex-format-string (rel)
-				    (format regex-format-string-template rel))
-	       (extract-link (rel)
-			     (if (-> rel
-				     regex-format-string
-				     (string-match headers))
-				 (match-string 1 headers))))
+				                    (format regex-format-string-template rel))
+	           (extract-link (rel)
+			                 (if (-> rel
+				                     regex-format-string
+				                     (string-match headers))
+				                 (match-string 1 headers))))
       (make-instance github-pageable
-		     :page (json-parse-string body)
-		     :next-link (extract-link "next")
-		     :prev-link (extract-link "prev")
-		     :first-link (extract-link "first")
-		     :last-link (extract-link "last")))))
+		             :page (json-parse-string body)
+		             :next-link (extract-link "next")
+		             :prev-link (extract-link "prev")
+		             :first-link (extract-link "first")
+		             :last-link (extract-link "last")))))
 
 (defun github-req (method url)
   "Make a request with http method METHOD to URL that set's the required headers for the GitHub API. Returns HEADERS and BODY as a plist with symbol keys."
   (message (format "Making GitHub Request: %s\t%s" method url))
   (let ((url-request-method method)
 
-	;; request headers
-	(url-request-extra-headers (list
-				     ;; auth token (PAT)
-				     (cons "Authorization" (concat "Bearer " github-access-token))
+	    ;; request headers
+	    (url-request-extra-headers (list
+				                    ;; auth token (PAT)
+                                    (->> github-access-token
+                                         (concat "Bearer ")
+                                         (cons "Authorization"))
 
-				     ;; gh's content-type
-				     (cons "Accept" "application/vnd.github+json")
+				                    ;; gh's content-type
+				                    (cons "Accept" "application/vnd.github+json")
 
-				     ;; gh API version
-				     (cons "X-GitHub-Api-Version" "2022-11-28"))))
+				                    ;; gh API version
+				                    (cons "X-GitHub-Api-Version" "2022-11-28"))))
     (with-current-buffer (url-retrieve-synchronously url)
       (let ((headers (buffer-substring (point-min) url-http-end-of-headers))
-	    (body (buffer-substring url-http-end-of-headers (point-max))))
-	(list :headers headers :body body)))))
+	        (body (buffer-substring url-http-end-of-headers (point-max))))
+        (unless (string-match-p "^HTTP/1.1\s200\sOK\n.*$" headers)
+          (error body))
+        (list :headers headers :body body)))))
 
 (defun github-get (url)
   (github-req "GET" url))
 
 (defun github-get-pageable (url)
   (->> (-> url
-	   github-get)
+	       github-get)
        (apply 'make-github-pageable)))
 
 (defun github-get-pageable-if (url)
@@ -125,24 +129,33 @@ See: https://docs.github.com/en/rest/guides/using-pagination-in-the-rest-api?api
 ;; Lib
 ;;
 
+(defun call-git-process (&rest args)
+  (with-temp-buffer
+    (apply #'call-process "git" nil (current-buffer) nil args)
+    (buffer-string)))
+
 (defun git-commit (&optional ref)
   "Returns the long SHA for REF."
   (let* ((ref (if ref ref "HEAD"))
-	 (sha (shell-command-to-string (format "git rev-parse %s" ref))))
-    (string-clean-whitespace sha)))
+	     (sha (call-git-process "rev-parse" ref))
+         (string-clean-whitespace sha))))
 
 (defun git-root ()
   "Returns an absolute path to the project root that contains the nearest .git folder."
-  (let ((root (shell-command-to-string "git rev-parse --show-toplevel")))
+  (let ((root (call-git-process "rev-parse" "--show-toplevel")))
     (string-clean-whitespace root)))
+
+(defun git-remotes ()
+  (-> (call-git-process "remote" "-v")
+      (split-string "\n")))
 
 (defun print-or-return (print val)
   "Helper function to either print VAL to minibuffer and copy to kill ring if called interactively,
 or simply return VAL otherwise."
   (if print
       (progn
-	(kill-new val)
-	(message val))
+	    (kill-new val)
+	    (message val))
     val))
 
 (defun github-remotes ()
@@ -161,9 +174,7 @@ or simply return VAL otherwise."
 			             ;; default -- no remote
 			             (t nil)))
 	           (is-nil (item) (if item nil t)))
-      (let ((remotes (-> "git remote -v"
-			             shell-command-to-string
-			             (split-string "\n"))))
+      (let ((remotes (git-remotes)))
 	    (->> (mapcar (lambda (remote) (extract remote)) remotes)
 	         (cl-remove-if (lambda (item) (is-nil item))))))))
 
@@ -183,42 +194,42 @@ or simply return VAL otherwise."
 (defun github-user-org (url)
   "Extracts GitHub User/Org from URL. Works with https and ssh URLs."
   (cl-flet* ((pluck-match (remote)
-			  (match-string 1 remote))
-	     (extract-from (remote)
-			   (cond
-			    ;; HTTP
-			    ((string-match "^https://github\.com/\\(.*\\)/.*$" remote) (pluck-match remote))
-			    ;; SSH
-			    ((string-match "^[ssh://]?git@github\.com:\\(.*\\)/.*\.git$" remote) (pluck-match remote))
-			    ;; default -- no match
-			    (t nil))))
+			              (match-string 1 remote))
+	         (extract-from (remote)
+			               (cond
+			                ;; HTTP
+			                ((string-match "^https://github\.com/\\(.*\\)/.*$" remote) (pluck-match remote))
+			                ;; SSH
+			                ((string-match "^[ssh://]?git@github\.com:\\(.*\\)/.*\.git$" remote) (pluck-match remote))
+			                ;; default -- no match
+			                (t nil))))
     (extract-from url)))
 
 (defun github-project-name (url)
   "Extracts the GitHub Project name from URL. Works with https and ssh URLs."
   (cl-flet* ((pluck-match (remote)
-			  (match-string 1 remote))
-	     (extract-from (remote)
-			   (cond
-			    ;; HTTP
-			    ((string-match "^https://github\.com/.*/\\(.*\\)$" remote) (pluck-match remote))
-			    ;; SSH
-			    ((string-match "^[ssh://]?git@github\.com:.*/\\(.*\\)\.git$" remote) (pluck-match remote))
-			    ;; default -- no match
-			    (t nil))))
+			              (match-string 1 remote))
+	         (extract-from (remote)
+			               (cond
+			                ;; HTTP
+			                ((string-match "^https://github\.com/.*/\\(.*\\)$" remote) (pluck-match remote))
+			                ;; SSH
+			                ((string-match "^[ssh://]?git@github\.com:.*/\\(.*\\)\.git$" remote) (pluck-match remote))
+			                ;; default -- no match
+			                (t nil))))
     (-> url
-	extract-from
-	(string-trim-right ".git[ \t\n\r]*"))))
+	    extract-from
+	    (string-trim-right ".git[ \t\n\r]*"))))
 
 (defun github-commit-url-format-string (commit)
   "Builds a format string for COMMIT, in long SHA form."
   (let* ((remote (github-remote))
-	 (user-org (github-user-org remote))
+	     (user-org (github-user-org remote))
          (project-name (github-project-name remote))
-	 (trailing-slash (-> github-base-url
-			     (substring -1)
-			     (string= "/")
-			     (if "" "/"))))
+	     (trailing-slash (-> github-base-url
+			                 (substring -1)
+			                 (string= "/")
+			                 (if "" "/"))))
     (concat github-base-url trailing-slash user-org "/" project-name "/%s/" commit)))
 
 ;;
@@ -230,10 +241,10 @@ or simply return VAL otherwise."
  will print to minibuffer and copy to kill-ring. Otherwise, returns the link as a string."
   (interactive)
   (let* ((res (-> (git-commit)
-		  github-commit-url-format-string
-		  (format "tree"))))
+		          github-commit-url-format-string
+		          (format "tree"))))
     (-> (called-interactively-p 'any)
-	(print-or-return res))))
+	    (print-or-return res))))
 
 (defun github-file-permalink ()
   "Returns a permalink to the HEAD of the current file. If called interactively, will
@@ -241,13 +252,13 @@ print to minibuffer and copy to kill-ring. Otherwise, returns the link as a stri
   (interactive)
   (with-current-buffer (current-buffer)
     (let* ((current-commit (git-commit))
-	   (trimmed (-> buffer-file-name
-			(string-trim-left (git-root))))
-	   (res (-> (github-commit-url-format-string current-commit)
-		    (format "blob")
-		    (concat trimmed))))
+	       (trimmed (-> buffer-file-name
+			            (string-trim-left (git-root))))
+	       (res (-> (github-commit-url-format-string current-commit)
+		            (format "blob")
+		            (concat trimmed))))
       (-> (called-interactively-p 'any)
-	  (print-or-return res)))))
+	      (print-or-return res)))))
 
 (defun github-permalink-at-point ()
   "Returns a permalink to the HEAD of the current file at the line under point, or
@@ -256,17 +267,17 @@ copy to kill-ring. Otherwise, returns the link as a string."
   (interactive)
   (with-current-buffer (current-buffer)
     (cl-flet ((get-line-numbers () (if (use-region-p)
-				       (mapcar 'line-number-at-pos (list (region-beginning) (region-end)))
-				     (list (line-number-at-pos))))
-	      (build-permalink (linenos)
-			       (let ((begin (car linenos))
-				     (end (cadr linenos)))
-				 (concat (github-file-permalink) "#L" begin (if end (concat "-L" end))))))
+				                       (mapcar 'line-number-at-pos (list (region-beginning) (region-end)))
+				                     (list (line-number-at-pos))))
+	          (build-permalink (linenos)
+			                   (let ((begin (car linenos))
+				                     (end (cadr linenos)))
+				                 (concat (github-file-permalink) "#L" begin (if end (concat "-L" end))))))
       (let ((permalink (->> (get-line-numbers)
-			    (mapcar 'number-to-string)
-			    build-permalink)))
-	(-> (called-interactively-p 'any)
-	    (print-or-return permalink))))))
+			                (mapcar 'number-to-string)
+			                build-permalink)))
+	    (-> (called-interactively-p 'any)
+	        (print-or-return permalink))))))
 
 ;;
 ;; Table
@@ -282,9 +293,9 @@ copy to kill-ring. Otherwise, returns the link as a string."
 (defun visit-url-in-browser (url)
   "Open URL in your system browser using shell commands."
   (cond ((eq system-type 'gnu/linux) (shell-command (format "xdg-open %s" url)))
-	((eq system-type 'darwin) (shell-command (format "open %s" url)))
-	((eq system-type 'windows) (shell-command (format "start %s" url)))
-	(t (error "Unsupported system-type: %s" system-type))))
+	    ((eq system-type 'darwin) (shell-command (format "open %s" url)))
+	    ((eq system-type 'windows) (shell-command (format "start %s" url)))
+	    (t (error "Unsupported system-type: %s" system-type))))
 
 (defun display-table-in-buffer (buffer rows columns-to-keep mode)
   "Given a sequence of hashtables ROWS, display COLUMNS-TO-KEEP in BUFFER. Clicking on
@@ -294,29 +305,29 @@ be a quoted variable of a major mode that extends tabulated-list-mode."
     (read-only-mode)
     (let ((inhibit-read-only t))
       (let* ((column-header-names columns-to-keep)
-	     (this-tabulated-list-entries (let ((rownum 0))
-					    (mapcar (lambda (row)
-						      (progn
-							(setq rownum (+ 1 rownum))
-							(list
-							 (number-to-string rownum)
-							 (vconcat (mapcar (lambda (key)
-									    (let* ((value (gethash key row))
-										   (cast-value (if (numberp value) (number-to-string value) value)))
-									      (cons
-									       cast-value
-									       (list
-										'action `(lambda (x)
-											   (-> "html_url"
-											       (gethash ,row)
-											       visit-url-in-browser))))))
-									  column-header-names)))))
-						    rows))))
-	(erase-buffer)
-	(setq tabulated-list-entries this-tabulated-list-entries)
-	(funcall mode)
-	(goto-char (point-min))
-	(display-buffer buffer)))))
+	         (this-tabulated-list-entries (let ((rownum 0))
+					                        (mapcar (lambda (row)
+						                              (progn
+							                            (setq rownum (+ 1 rownum))
+							                            (list
+							                             (number-to-string rownum)
+							                             (vconcat (mapcar (lambda (key)
+									                                        (let* ((value (gethash key row))
+										                                           (cast-value (if (numberp value) (number-to-string value) value)))
+									                                          (cons
+									                                           cast-value
+									                                           (list
+										                                        'action `(lambda (x)
+											                                               (-> "html_url"
+											                                                   (gethash ,row)
+											                                                   visit-url-in-browser))))))
+									                                      column-header-names)))))
+						                            rows))))
+	    (erase-buffer)
+	    (setq tabulated-list-entries this-tabulated-list-entries)
+	    (funcall mode)
+	    (goto-char (point-min))
+	    (display-buffer buffer)))))
 
 (defclass github-table ()
   ((pageable
@@ -358,16 +369,16 @@ be a quoted variable of a major mode that extends tabulated-list-mode."
    (table-mode table)))
 
 (cl-flet ((make-if (tbl pf)
-		   (let ((np (->> tbl
-				  pageable
-				  (funcall pf)
-				  github-get-pageable-if)))
-		     (when np
-		       (make-instance github-table
-			:pageable np
-			:table-buffer (table-buffer tbl)
-			:table-columns (table-columns tbl)
-			:table-mode (table-mode tbl))))))
+		           (let ((np (->> tbl
+				                  pageable
+				                  (funcall pf)
+				                  github-get-pageable-if)))
+		             (when np
+		               (make-instance github-table
+			                          :pageable np
+			                          :table-buffer (table-buffer tbl)
+			                          :table-columns (table-columns tbl)
+			                          :table-mode (table-mode tbl))))))
   (cl-defmethod github-table-next ((table github-table))
     (make-if table 'next-link))
   (cl-defmethod github-table-prev ((table github-table))
@@ -396,12 +407,12 @@ be a quoted variable of a major mode that extends tabulated-list-mode."
 (defvar github-issues-current-table nil)
 
 (cl-flet ((handler (f)
-		   (lambda ()
-		     (interactive)
-		     (let ((nt (funcall f github-issues-current-table)))
-		       (when nt
-			 (github-table-display-table-in-buffer nt) 
-			 (setq github-issues-current-table nt))))))
+		           (lambda ()
+		             (interactive)
+		             (let ((nt (funcall f github-issues-current-table)))
+		               (when nt
+			             (github-table-display-table-in-buffer nt) 
+			             (setq github-issues-current-table nt))))))
   (define-key github-issues-mode-map (kbd "p") (handler 'github-table-prev))
   (define-key github-issues-mode-map (kbd "n") (handler 'github-table-next))
   (define-key github-issues-mode-map (kbd "f") (handler 'github-table-first))
@@ -413,19 +424,19 @@ be a quoted variable of a major mode that extends tabulated-list-mode."
       list
       interactive)
   (let* ((buffer (-> kwargs
-		    (plist-get :buffer)
-		    (or (get-buffer-create "*GitHub Issues*"))))
-	(columns-to-keep (mapcar (lambda (item)
-				   (car item))
-				 github-project-issues-tabulated-list-format))
-	(pageable (-> handle
-		      github-remote
-		      github-get-issues))
-	(tbl (make-instance github-table
-			  :pageable pageable
-			  :table-buffer buffer
-			  :table-columns columns-to-keep
-			  :table-mode 'github-issues-mode)))
+		             (plist-get :buffer)
+		             (or (get-buffer-create "*GitHub Issues*"))))
+	     (columns-to-keep (mapcar (lambda (item)
+				                    (car item))
+				                  github-project-issues-tabulated-list-format))
+	     (pageable (-> handle
+		               github-remote
+		               github-get-issues))
+	     (tbl (make-instance github-table
+			                 :pageable pageable
+			                 :table-buffer buffer
+			                 :table-columns columns-to-keep
+			                 :table-mode 'github-issues-mode)))
     (github-table-display-table-in-buffer tbl)
     (setq github-issues-current-table tbl)))
 
@@ -448,12 +459,12 @@ be a quoted variable of a major mode that extends tabulated-list-mode."
 (defvar github-pull-requests-current-table nil)
 
 (cl-flet ((handler (f)
-		   (lambda ()
-		     (interactive)
-		     (let ((nt (funcall f github-pull-requests-current-table)))
-		       (when nt
-			 (github-table-display-table-in-buffer nt) 
-			 (setq github-pull-requests-current-table nt))))))
+		           (lambda ()
+		             (interactive)
+		             (let ((nt (funcall f github-pull-requests-current-table)))
+		               (when nt
+			             (github-table-display-table-in-buffer nt) 
+			             (setq github-pull-requests-current-table nt))))))
   (define-key github-pull-requests-mode-map (kbd "p") (handler 'github-table-prev))
   (define-key github-pull-requests-mode-map (kbd "n") (handler 'github-table-next))
   (define-key github-pull-requests-mode-map (kbd "f") (handler 'github-table-first))
@@ -465,19 +476,19 @@ be a quoted variable of a major mode that extends tabulated-list-mode."
       list
       interactive)
   (let* ((buffer (-> kwargs
-		     (plist-get :buffer)
-		     (or (get-buffer-create "*GitHub Pull Requests*"))))
-	 (columns-to-keep (mapcar (lambda (item)
-				    (car item))
-				  github-project-pull-requests-tabulated-list-format))
-	 (pageable (-> handle
-		       github-remote
-		       github-get-pull-requests))
-	 (tbl (make-instance github-table
-			     :pageable pageable
-			     :table-buffer buffer
-			     :table-columns columns-to-keep
-			     :table-mode 'github-pull-requests-mode)))
+		             (plist-get :buffer)
+		             (or (get-buffer-create "*GitHub Pull Requests*"))))
+	     (columns-to-keep (mapcar (lambda (item)
+				                    (car item))
+				                  github-project-pull-requests-tabulated-list-format))
+	     (pageable (-> handle
+		               github-remote
+		               github-get-pull-requests))
+	     (tbl (make-instance github-table
+			                 :pageable pageable
+			                 :table-buffer buffer
+			                 :table-columns columns-to-keep
+			                 :table-mode 'github-pull-requests-mode)))
     (github-table-display-table-in-buffer tbl)
     (setq github-issues-current-table tbl)))
 
@@ -488,9 +499,9 @@ be a quoted variable of a major mode that extends tabulated-list-mode."
 (defvar github-project-releases-tabulated-list-format
   [("id" 20 t) ;; most-positive-fixnum string repr on my system has length 19
    ("created_at" 21 t) ;; pretty sure the timestamp format always has length 20
-   ("tag_name" 16 t) ;; 16 length was chosen arbitrarily
-   ("name" 16 t) ;; 16 length was chosen arbitrarily
-   ("body" 128 t)] ;; 128 length was chosen arbitrarily
+   ("tag_name" 16 t)   ;; 16 length was chosen arbitrarily
+   ("name" 16 t)       ;; 16 length was chosen arbitrarily
+   ("body" 128 t)]     ;; 128 length was chosen arbitrarily
   )
 
 (define-derived-mode github-releases-mode tabulated-list-mode "github-releases-mode" "Major mode for viewing GitHub Releases."
@@ -502,12 +513,12 @@ be a quoted variable of a major mode that extends tabulated-list-mode."
 (defvar github-releases-current-table nil)
 
 (cl-flet ((handler (f)
-		   (lambda ()
-		     (interactive)
-		     (let ((nt (funcall f github-releases-current-table)))
-		       (when nt
-			 (github-table-display-table-in-buffer nt) 
-			 (setq github-releases-current-table nt))))))
+		           (lambda ()
+		             (interactive)
+		             (let ((nt (funcall f github-releases-current-table)))
+		               (when nt
+			             (github-table-display-table-in-buffer nt) 
+			             (setq github-releases-current-table nt))))))
   (define-key github-releases-mode-map (kbd "p") (handler 'github-table-prev))
   (define-key github-releases-mode-map (kbd "n") (handler 'github-table-next))
   (define-key github-releases-mode-map (kbd "f") (handler 'github-table-first))
@@ -519,19 +530,19 @@ be a quoted variable of a major mode that extends tabulated-list-mode."
       list
       interactive)
   (let* ((buffer (-> kwargs
-		     (plist-get :buffer)
-		     (or (get-buffer-create "*GitHub Releases*"))))
-	 (columns-to-keep (mapcar (lambda (item)
-				    (car item))
-				  github-project-releases-tabulated-list-format))
-	 (pageable (-> handle
-		       github-remote
-		       github-get-releases))
-	 (tbl (make-instance github-table
-			     :pageable pageable
-			     :table-buffer buffer
-			     :table-columns columns-to-keep
-			     :table-mode 'github-releases-mode)))
+		             (plist-get :buffer)
+		             (or (get-buffer-create "*GitHub Releases*"))))
+	     (columns-to-keep (mapcar (lambda (item)
+				                    (car item))
+				                  github-project-releases-tabulated-list-format))
+	     (pageable (-> handle
+		               github-remote
+		               github-get-releases))
+	     (tbl (make-instance github-table
+			                 :pageable pageable
+			                 :table-buffer buffer
+			                 :table-columns columns-to-keep
+			                 :table-mode 'github-releases-mode)))
     (github-table-display-table-in-buffer tbl)
     (setq github-releases-current-table tbl)))
 
