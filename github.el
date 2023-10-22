@@ -137,8 +137,8 @@ See: https://docs.github.com/en/rest/guides/using-pagination-in-the-rest-api?api
 (defun git-commit (&optional ref)
   "Returns the long SHA for REF."
   (let* ((ref (if ref ref "HEAD"))
-	     (sha (call-git-process "rev-parse" ref))
-         (string-clean-whitespace sha))))
+	     (sha (call-git-process "rev-parse" ref)))
+    (string-clean-whitespace sha)))
 
 (defun git-root ()
   "Returns an absolute path to the project root that contains the nearest .git folder."
