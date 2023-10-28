@@ -1,3 +1,6 @@
+(require 'ert)
+(eval-when-compile (require 'github))
+
 (defun read-file-to-string (filepath)
   (with-temp-buffer
     (insert-file-contents filepath)
@@ -30,3 +33,5 @@
   (let* ((body (read-file-to-string "./testdata/issues.json"))
 	 (pageable (make-github-pageable :headers "" :body body)))
     (should (equal (next-link pageable) nil))))
+
+(provide 'github-tests)
