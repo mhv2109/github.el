@@ -1,5 +1,7 @@
 ;;;  -*- lexical-binding: t -*-
 
+(require 'eieio)
+
 ;;
 ;; Global variables
 ;;

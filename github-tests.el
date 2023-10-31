@@ -1,5 +1,7 @@
+;;; -*- lexical-binding: t -*-
+
 (require 'ert)
-(eval-when-compile (require 'github))
+(require 'github)
 
 (defun read-file-to-string (filepath)
   (with-temp-buffer
