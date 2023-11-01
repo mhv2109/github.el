@@ -13,8 +13,8 @@ clean:
 	rm -f *.elc
 
 test: github-tests.elc
-	$(EMACS) -batch -Q -L . -l github-tests.elc -f ert-run-tests-batch-and-exit
+	$(EMACS) --batch -Q -L . -l github-tests.elc -f ert-run-tests-batch-and-exit
 
 .SUFFIXES: .el .elc
 .el.elc:
-	$(EMACS) -batch -Q -L . -f batch-byte-compile $<
+	$(EMACS) --batch -Q -L . -f batch-byte-compile $<
