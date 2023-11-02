@@ -40,13 +40,11 @@ See: https://docs.github.com/en/authentication/keeping-your-account-and-data-sec
     :accessor last-link))
   (:documentation "https://docs.github.com/en/rest/guides/using-pagination-in-the-rest-api?apiVersion=2022-11-28#using-link-headers"))
 
-(defun make-github-pageable (&rest args)
+(defun make-github-pageable (headers body)
   "Parses HTTP response per GitHub's docs to build a GITHUB-PAGEABLE.
 
 See: https://docs.github.com/en/rest/guides/using-pagination-in-the-rest-api?apiVersion=2022-11-28#using-link-headers"
-  (let* ((body (plist-get args :body))
-	     (headers (plist-get args :headers))
-	     (regex-format-string-template "[,]?[[:space:]]+<\\([^<>]*\\)>;[[:space:]]+rel=\"%s\""))
+  (let ((regex-format-string-template "[,]?[[:space:]]+<\\([^<>]*\\)>;[[:space:]]+rel=\"%s\""))
     (cl-flet* ((regex-format-string (rel)
 				                    (format regex-format-string-template rel))
 	           (extract-link (rel)
@@ -58,6 +56,11 @@ See: https://docs.github.com/en/rest/guides/using-pagination-in-the-rest-api?api
 		             :prev-link (extract-link "prev")
 		             :first-link (extract-link "first")
 		             :last-link (extract-link "last")))))
+
+(defun make-github-pageable-from-resp (resp)
+  (let ((headers (plist-get resp :headers))
+        (body (plist-get resp :body)))
+    (make-github-pageable headers body)))
 
 (defun github-req (method url)
   "Make a request with http method METHOD to URL that set's the
@@ -80,7 +83,7 @@ plist with symbol keys."
     (with-current-buffer (url-retrieve-synchronously url)
       (let ((headers (buffer-substring (point-min) url-http-end-of-headers))
 	        (body (buffer-substring url-http-end-of-headers (point-max))))
-        (unless (string-match-p "^HTTP/1.1\s200\sOK\n.*$" headers)
+        (unless (string-match-p "^HTTP/.*\s200\sOK\n.*$" headers)
           (error body))
         (list :headers headers :body body)))))
 
@@ -88,7 +91,8 @@ plist with symbol keys."
   (github-req "GET" url))
 
 (defun github-get-pageable (url)
-  (apply 'make-github-pageable (github-get url)))
+  (let ((res (github-get url)))
+    (make-github-pageable-from-resp res)))
 
 (defun github-get-pageable-if (url)
   (if url
@@ -108,21 +112,21 @@ is the HTTP request path. Uses GITHUB-API-BASE-URL."
          (project-name (github-project-name remote))
          (path (format "repos/%s/%s/issues?pulls=false" user-org project-name)) ;; pulls=false omits pull requests
          (resp (github-get-path path)))
-    (make-github-pageable resp)))
+    (make-github-pageable-from-resp resp)))
 
 (defun github-get-pull-requests (remote)
   (let* ((user-org (github-user-org remote))
          (project-name (github-project-name remote))
          (path (format "repos/%s/%s/pulls" user-org project-name))
          (resp (github-get-path path)))
-    (make-github-pageable resp)))
+    (make-github-pageable-from-resp resp)))
 
 (defun github-get-releases (remote)
   (let* ((user-org (github-user-org remote))
          (project-name (github-project-name remote))
          (path (format "repos/%s/%s/releases" user-org project-name))
          (resp (github-get-path path)))
-    (make-github-pageable resp)))
+    (make-github-pageable-from-resp resp)))
 
 ;;
 ;; Lib
