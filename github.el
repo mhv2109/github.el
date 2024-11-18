@@ -7,7 +7,7 @@
 ;; Global variables
 ;;
 
-(defvar github-access-token ""
+(defvar github-access-token (getenv "GITHUB_TOKEN")
   "GitHub Personal Access Token (PAT) as a string.
 
 See: https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens")
@@ -30,7 +30,7 @@ See: https://docs.github.com/en/authentication/keeping-your-account-and-data-sec
     :initarg :next-link
     :accessor next-link)
    (prev-link
-    :initarg :prev-link 
+    :initarg :prev-link
     :accessor prev-link)
    (first-link
     :initarg :first-link
@@ -293,7 +293,7 @@ link as a string."
 	    (t (error "Unsupported system-type: %s" system-type))))
 
 (defun display-table-in-buffer (buffer rows columns-to-keep mode)
-  "Given a sequence of hashtables ROWS, display COLUMNS-TO-KEEP in 
+  "Given a sequence of hashtables ROWS, display COLUMNS-TO-KEEP in
 BUFFER. Clicking on or pressing ENTER on any text will open the
 respective page in the browser. MODE should be a quoted variable of a
 major mode that extends tabulated-list-mode."
@@ -392,7 +392,7 @@ from tabulated-list-mode."))
   )
 
 (define-derived-mode github-issues-mode tabulated-list-mode "github-issues-mode" "Major mode for viewing GitHub Issues."
-  (setq tabulated-list-format github-project-issues-tabulated-list-format) 
+  (setq tabulated-list-format github-project-issues-tabulated-list-format)
   (setq tabulated-list-padding 2)
   (tabulated-list-init-header)
   (tabulated-list-print t))
@@ -404,7 +404,7 @@ from tabulated-list-mode."))
 		             (interactive)
 		             (let ((nt (funcall f github-issues-current-table)))
 		               (when nt
-			             (github-table-display-table-in-buffer nt) 
+			             (github-table-display-table-in-buffer nt)
 			             (setq github-issues-current-table nt))))))
   (define-key github-issues-mode-map (kbd "p") (handler 'github-table-prev))
   (define-key github-issues-mode-map (kbd "n") (handler 'github-table-next))
@@ -439,7 +439,7 @@ from tabulated-list-mode."))
   )
 
 (define-derived-mode github-pull-requests-mode tabulated-list-mode "github-pull-requests-mode" "Major mode for viewing GitHub Pull Requests."
-  (setq tabulated-list-format github-project-pull-requests-tabulated-list-format) 
+  (setq tabulated-list-format github-project-pull-requests-tabulated-list-format)
   (setq tabulated-list-padding 2)
   (tabulated-list-init-header)
   (tabulated-list-print t))
@@ -451,7 +451,7 @@ from tabulated-list-mode."))
 		             (interactive)
 		             (let ((nt (funcall f github-pull-requests-current-table)))
 		               (when nt
-			             (github-table-display-table-in-buffer nt) 
+			             (github-table-display-table-in-buffer nt)
 			             (setq github-pull-requests-current-table nt))))))
   (define-key github-pull-requests-mode-map (kbd "p") (handler 'github-table-prev))
   (define-key github-pull-requests-mode-map (kbd "n") (handler 'github-table-next))
@@ -488,7 +488,7 @@ from tabulated-list-mode."))
   )
 
 (define-derived-mode github-releases-mode tabulated-list-mode "github-releases-mode" "Major mode for viewing GitHub Releases."
-  (setq tabulated-list-format github-project-releases-tabulated-list-format) 
+  (setq tabulated-list-format github-project-releases-tabulated-list-format)
   (setq tabulated-list-padding 2)
   (tabulated-list-init-header)
   (tabulated-list-print t))
@@ -500,7 +500,7 @@ from tabulated-list-mode."))
 		             (interactive)
 		             (let ((nt (funcall f github-releases-current-table)))
 		               (when nt
-			             (github-table-display-table-in-buffer nt) 
+			             (github-table-display-table-in-buffer nt)
 			             (setq github-releases-current-table nt))))))
   (define-key github-releases-mode-map (kbd "p") (handler 'github-table-prev))
   (define-key github-releases-mode-map (kbd "n") (handler 'github-table-next))
